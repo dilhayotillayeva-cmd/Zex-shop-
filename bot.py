@@ -73,7 +73,7 @@ def now_iso():
 def ensure_user(user):
     with closing(db()) as con:
         con.execute(
-            "INSERT INTO users(user_id, username, first_name, created_at) VALUES(?,?,?,?,?) "
+            "INSERT INTO users(user_id, username, first_name, created_at) VALUES(?,?,?,?) "
             "ON CONFLICT(user_id) DO UPDATE SET username=excluded.username, first_name=excluded.first_name",
             (user.id, user.username or "", user.first_name or "", now_iso())
         )
