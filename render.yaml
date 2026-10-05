@@ -1,9 +1,8 @@
 services:
   - type: web
-    name: lwox-gold-bot
-    runtime: python
-    plan: free
-    buildCommand: python -m pip install --upgrade pip setuptools wheel && pip install --only-binary=:all: -r requirements.txt
+    name: zex-shop
+    env: python
+    buildCommand: pip install --only-binary=:all: -r requirements.txt
     startCommand: uvicorn bot:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: BOT_TOKEN
