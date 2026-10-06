@@ -62,10 +62,19 @@ async def start(m):
     save(m.from_user); state.pop(m.from_user.id,None)
     await m.answer("👋 ZEX SHOP ga xush kelibsiz!\n\n🪙 1 Gold = 120 so‘m\nKerakli bo‘limni tanlang 👇",reply_markup=main())
 
-@dp.message(Command("Admin"))
+@dp.message(Command("admin", "Admin", "ADMIN"))
 async def admin_cmd(m):
-    if not admin(m.from_user.id): return await m.answer("⛔ Sizda admin huquqi yo‘q.")
-    state.pop(m.from_user.id,None); await m.answer("🛠 ADMIN PANEL",reply_markup=admink())
+    if not admin(m.from_user.id):
+        await m.answer(
+            f"⛔ Sizda admin huquqi yo‘q.\n\n"
+            f"🆔 Sizning Telegram ID: {m.from_user.id}\n\n"
+            "Render → Environment Variables → ADMIN_IDS ga shu ID ni yozing, "
+            "keyin Deploy qiling."
+        )
+        return
+    state.pop(m.from_user.id,None)
+    broadcast.discard(m.from_user.id)
+    await m.answer("🛠 ADMIN PANEL",reply_markup=admink())
 
 @dp.message(lambda m: m.photo is not None)
 async def photo(m):
@@ -104,6 +113,17 @@ async def msg(m):
     uid=m.from_user.id; save(m.from_user)
     if muted(uid) and not admin(uid): return await m.answer("🔇 Siz vaqtincha bloklangansiz.")
     t=m.text or ""; s=state.get(uid)
+
+    # Telegram may deliver /Admin as plain text because bot commands are normally lowercase.
+    if t.strip().lower() == "/admin":
+        if not admin(uid):
+            return await m.answer(
+                f"⛔ Sizda admin huquqi yo‘q.\n\n"
+                f"🆔 Sizning Telegram ID: {uid}\n\n"
+                "Render → Environment Variables → ADMIN_IDS ga shu ID ni yozing, keyin Deploy qiling."
+            )
+        state.pop(uid,None); broadcast.discard(uid)
+        return await m.answer("🛠 ADMIN PANEL",reply_markup=admink())
 
     if s=="calc":
         try:
