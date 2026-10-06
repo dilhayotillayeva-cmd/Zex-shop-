@@ -175,7 +175,17 @@ async def msg(m):
             state.pop(uid,None); clear_draft(uid)
             return await m.answer(f"❌ Balans yetarli emas.\nKerak: {cost:,} so‘m\nBalans: {bal(uid):,.0f} so‘m",reply_markup=main())
         change(uid,-cost); set_draft(uid,"pattern",g,cost,""); state.pop(uid,None)
-        await m.answer_photo(types.FSInputFile("g22_flock.jpg"),caption="🔫 G22 GLOCK FLOCK PATTERN SOTIB OLING\nVA BIZGA YUBORING\n\nMisol: 100 | 756\nGold narxi | Pattern soni\n\nSTANDOFF 2 PROFILIZNI RASMINI YUBORING")
+        market_gold=math.ceil(g*1.2)
+        await m.answer_photo(
+            types.FSInputFile("g22_flock.jpg"),
+            caption=(
+                "BOZORDAN G22 FLOCK SOTIB OLING\n"
+                f"VA UNI QAYTA ORDERGA SHU {market_gold} NARXGA BOZORGA QO‘YING\n\n"
+                "BOT AYTGAN BUYRUQLARNI TO‘G‘RI BAJARING.\n"
+                "FIKRINGIZ O‘ZGARSA BEKOR QILING."
+            )
+        )
+        await m.answer_photo(types.FSInputFile("g22_glock_extra.jpg"))
         return await m.answer("1️⃣ Pattern sonini yuboring. Masalan: 756")
 
     if draft and draft.get("step")=="pattern":
