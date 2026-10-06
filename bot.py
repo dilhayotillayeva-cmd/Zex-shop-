@@ -60,6 +60,12 @@ def clear_draft(uid):
     with closing(con()) as c:
         c.execute("DELETE FROM drafts WHERE user_id=?",(uid,)); c.commit()
 
+def cancel_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="❌ BEKOR QILISH")]],
+        resize_keyboard=True
+    )
+
 def main():
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="🎟 PROMOKOD"),KeyboardButton(text="👤 PROFIL")],
@@ -161,9 +167,17 @@ async def msg(m):
     if s=="calc":
         try:
             g=int(t.replace(" ","")); assert g>0
-            await m.answer(f"🧮 {g:,} Gold × 120 so‘m = {g*RATE:,} so‘m")
+            await m.answer(f"🧮 {g:,} Gold × 120 so‘m = {g*RATE:,} so‘m", reply_markup=main())
         except: await m.answer("❌ Masalan: 100")
         state.pop(uid,None); return
+
+    if t=="❌ BEKOR QILISH":
+        draft=get_draft(uid)
+        if isinstance(draft,dict) and draft.get("step") in ("pattern","photo"):
+            change(uid, draft["cost"])
+        state.pop(uid,None)
+        clear_draft(uid)
+        return await m.answer("❌ Amal bekor qilindi.", reply_markup=main())
 
     draft=get_draft(uid)
 
@@ -179,14 +193,14 @@ async def msg(m):
         await m.answer_photo(
             types.FSInputFile("g22_flock.jpg"),
             caption=(
-                "BOZORDAN G22 FLOCK SOTIB OLING\n"
-                f"VA UNI QAYTA ORDERGA SHU {market_gold} NARXGA BOZORGA QO‘YING\n\n"
-                "BOT AYTGAN BUYRUQLARNI TO‘G‘RI BAJARING.\n"
-                "FIKRINGIZ O‘ZGARSA BEKOR QILING."
+                "BOZORDAN G22 FLOCK SOTIB OLING\n\n"
+                f"UNI QAYTA ORDERGA SHU {market_gold} NARXGA BOZORGA QO‘YING😉\n\n"
+                "Pastdagi 2 ta qadamni bajaring ‼️\n\n"
+                "1️⃣ QADAM  SKIN PATTERN RAQAMINI KIRITING\n"
+                "Keyin 2 qadamga o‘tasiz ✅"
             )
         )
         await m.answer_photo(types.FSInputFile("g22_glock_extra.jpg"))
-        return await m.answer("1️⃣ Pattern sonini yuboring. Masalan: 756")
 
     if draft and draft.get("step")=="pattern":
         pattern=t.strip()
@@ -237,8 +251,12 @@ async def msg(m):
     if t=="👤 PROFIL": return await m.answer(f"👤 PROFIL\n\n🆔 ID: {uid}\n💰 Balans: {bal(uid):,.0f} so‘m")
     if t=="💳 PUL KIRITISH": return await m.answer("💳 Pul kiritish uchun: @lwox_org")
     if t=="🎟 PROMOKOD": return await m.answer("🎟 Promokod bo‘limi.")
-    if t=="🧮 GOLD HISOBLASH": state[uid]="calc"; return await m.answer("🧮 GOLD MIQDORINI KIRITING\n\nKurs: 1 Gold = 120 so‘m\nMasalan: 100")
-    if t=="🛒 GOLD SOTIB OLISH": state[uid]="buy"; return await m.answer("🪙 GOLD MIQDORINI KIRITING\n\nKurs: 1 Gold = 120 so‘m\nMasalan: 100")
+    if t=="🧮 GOLD HISOBLASH":
+        state[uid]="calc"
+        return await m.answer("🧮 GOLD MIQDORINI KIRITING\n\nKurs: 1 Gold = 120 so‘m\nMasalan: 100", reply_markup=cancel_keyboard())
+    if t=="🛒 GOLD SOTIB OLISH":
+        state[uid]="buy"
+        return await m.answer("🪙 GOLD MIQDORINI KIRITING\n\nKurs: 1 Gold = 120 so‘m\nMasalan: 100", reply_markup=cancel_keyboard())
     await m.answer("Menyudan kerakli bo‘limni tanlang 👇",reply_markup=main())
 
 @app.get("/")
