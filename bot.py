@@ -25,6 +25,9 @@ def init():
         id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,username TEXT,gold INTEGER,
         cost REAL,pattern TEXT,admin_gold INTEGER,photo_file_id TEXT,status TEXT DEFAULT 'PENDING',
         created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS drafts(
+        user_id INTEGER PRIMARY KEY,step TEXT,gold INTEGER DEFAULT 0,cost REAL DEFAULT 0,
+        pattern TEXT DEFAULT '')""")
         c.commit()
 def save(u):
     with closing(con()) as c:
@@ -41,6 +44,21 @@ def muted(uid):
     with closing(con()) as c: r=c.execute("SELECT muted_until FROM users WHERE user_id=?",(uid,)).fetchone()
     try: return bool(r and r[0] and datetime.fromisoformat(r[0])>datetime.utcnow())
     except: return False
+
+def set_draft(uid, step, gold=0, cost=0, pattern=""):
+    with closing(con()) as c:
+        c.execute("INSERT OR REPLACE INTO drafts(user_id,step,gold,cost,pattern) VALUES(?,?,?,?,?)",
+                  (uid,step,gold,cost,pattern)); c.commit()
+
+def get_draft(uid):
+    with closing(con()) as c:
+        r=c.execute("SELECT step,gold,cost,pattern FROM drafts WHERE user_id=?",(uid,)).fetchone()
+    if not r: return None
+    return {"step":r[0],"gold":int(r[1]),"cost":float(r[2]),"pattern":r[3] or ""}
+
+def clear_draft(uid):
+    with closing(con()) as c:
+        c.execute("DELETE FROM drafts WHERE user_id=?",(uid,)); c.commit()
 
 def main():
     return ReplyKeyboardMarkup(keyboard=[
@@ -59,7 +77,7 @@ def obtn(i):
 
 @dp.message(CommandStart())
 async def start(m):
-    save(m.from_user); state.pop(m.from_user.id,None)
+    save(m.from_user); state.pop(m.from_user.id,None); clear_draft(m.from_user.id)
     await m.answer("👋 ZEX SHOP ga xush kelibsiz!\n\n🪙 1 Gold = 120 so‘m\nKerakli bo‘limni tanlang 👇",reply_markup=main())
 
 @dp.message(Command("admin", "Admin", "ADMIN"))
@@ -78,16 +96,31 @@ async def admin_cmd(m):
 
 @dp.message(lambda m: m.photo is not None)
 async def photo(m):
-    uid=m.from_user.id; save(m.from_user); s=state.get(uid)
-    if not isinstance(s,dict) or s.get("step")!="photo": return
-    ag=math.ceil(s["gold"]*1.2); pid=m.photo[-1].file_id
+    uid=m.from_user.id
+    save(m.from_user)
+    s=get_draft(uid)
+    if not isinstance(s,dict) or s.get("step")!="photo":
+        await m.answer("❌ Hozir rasm qabul qilish bosqichida emassiz. 🛒 GOLD SOTIB OLISH bo‘limidan qaytadan boshlang.")
+        return
+
+    ag=math.ceil(s["gold"]*1.2)
+    pid=m.photo[-1].file_id
     with closing(con()) as c:
-        cur=c.execute("INSERT INTO orders(user_id,username,gold,cost,pattern,admin_gold,photo_file_id) VALUES(?,?,?,?,?,?,?)",
-                       (uid,m.from_user.username or "",s["gold"],s["cost"],s["pattern"],ag,pid))
+        cur=c.execute(
+            "INSERT INTO orders(user_id,username,gold,cost,pattern,admin_gold,photo_file_id) VALUES(?,?,?,?,?,?,?)",
+            (uid,m.from_user.username or "",s["gold"],s["cost"],s["pattern"],ag,pid))
         oid=cur.lastrowid; c.commit()
-    state.pop(uid,None)
-    await m.answer(f"✅ BUYURTMA QABUL QILINDI!\n\n🪙 Gold: {s['gold']}\n💰 Narxi: {s['cost']:,.0f} so‘m\n🔢 Pattern: {s['pattern']}\n\nAdmin buyurtmani tekshiradi.",reply_markup=main())
-    cap=f"🛒 YANGI BUYURTMA #{oid}\n\n👤 MIJOZ: {uid}\n💰 NARXI: {s['cost']:,.0f} so‘m\n🔢 PATTERN: {s['pattern']}\n🪙 GOLD: {ag} (20% qo‘shilgan)\n\nBUYURTMA AMALGA OSHDIMI?"
+    clear_draft(uid)
+
+    await m.answer(
+        f"✅ BUYURTMA QABUL QILINDI!\n\n"
+        f"🪙 Gold: {s['gold']}\n💰 Narxi: {s['cost']:,.0f} so‘m\n"
+        f"🔢 Pattern: {s['pattern']}\n\nAdmin buyurtmani tekshiradi.",
+        reply_markup=main())
+
+    cap=(f"🛒 YANGI BUYURTMA #{oid}\n\n👤 MIJOZ: {uid}\n"
+         f"💰 NARXI: {s['cost']:,.0f} so‘m\n🔢 PATTERN: {s['pattern']}\n"
+         f"🪙 GOLD: {ag} (20% qo‘shilgan)\n\nBUYURTMA AMALGA OSHDIMI?")
     for a in ADMINS:
         try: await bot.send_photo(a,pid,caption=cap,reply_markup=obtn(oid))
         except Exception as e: print("ADMIN SEND ERROR",e,flush=True)
@@ -132,18 +165,23 @@ async def msg(m):
         except: await m.answer("❌ Masalan: 100")
         state.pop(uid,None); return
 
+    draft=get_draft(uid)
+
     if s=="buy":
         try: g=int(t.replace(" ","")); assert g>0
         except: return await m.answer("❌ Gold miqdorini son bilan kiriting. Masalan: 100")
         cost=g*RATE
         if bal(uid)<cost:
-            state.pop(uid,None); return await m.answer(f"❌ Balans yetarli emas.\nKerak: {cost:,} so‘m\nBalans: {bal(uid):,.0f} so‘m",reply_markup=main())
-        change(uid,-cost); state[uid]={"step":"pattern","gold":g,"cost":cost}
+            state.pop(uid,None); clear_draft(uid)
+            return await m.answer(f"❌ Balans yetarli emas.\nKerak: {cost:,} so‘m\nBalans: {bal(uid):,.0f} so‘m",reply_markup=main())
+        change(uid,-cost); set_draft(uid,"pattern",g,cost,""); state.pop(uid,None)
         await m.answer_photo(types.FSInputFile("g22_flock.jpg"),caption="🔫 G22 GLOCK FLOCK PATTERN SOTIB OLING\nVA BIZGA YUBORING\n\nMisol: 100 | 756\nGold narxi | Pattern soni\n\nSTANDOFF 2 PROFILIZNI RASMINI YUBORING")
         return await m.answer("1️⃣ Pattern sonini yuboring. Masalan: 756")
 
-    if isinstance(s,dict) and s.get("step")=="pattern":
-        s["step"]="photo"; s["pattern"]=t.strip(); state[uid]=s
+    if draft and draft.get("step")=="pattern":
+        pattern=t.strip()
+        if not pattern: return await m.answer("❌ Pattern sonini yuboring. Masalan: 756")
+        set_draft(uid,"photo",draft["gold"],draft["cost"],pattern)
         return await m.answer("2️⃣ Endi STANDOFF 2 profilingizning rasmini yuboring 📸")
 
     if isinstance(s,dict) and s.get("step") in ("add","sub","mute"):
