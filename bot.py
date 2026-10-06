@@ -1,7 +1,7 @@
 import os, sqlite3, math
 from contextlib import closing
 from datetime import datetime, timedelta
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart, Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
@@ -14,6 +14,11 @@ if not BASE: raise RuntimeError("WEBHOOK_BASE is missing")
 
 DB="zex_shop.db"; RATE=120; WEBHOOK=BASE+"/webhook"
 bot=Bot(TOKEN); dp=Dispatcher(); app=FastAPI(); state={}; broadcast=set()
+
+@app.head("/")
+async def uptime_head():
+    return Response(status_code=200)
+
 
 def con(): return sqlite3.connect(DB)
 def init():
