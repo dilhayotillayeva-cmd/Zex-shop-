@@ -1,17 +1,22 @@
-ZEX SHOP Telegram Bot
+ZEX SHOP - FIXED WEBHOOK VERSION
 
 Python: 3.11.9
 
-Render:
-Build Command:
+Render Build Command:
 pip install --only-binary=:all: -r requirements.txt
 
-Start Command:
+Render Start Command:
 uvicorn bot:app --host 0.0.0.0 --port $PORT
 
-Environment Variables:
-BOT_TOKEN=BotFather token
-ADMIN_IDS=Telegram admin ID (optional for this basic version)
-WEBHOOK_BASE=https://YOUR-SERVICE-NAME.onrender.com
+Environment:
+BOT_TOKEN = BotFather token
+ADMIN_IDS = Telegram ID (optional)
+WEBHOOK_BASE = https://zex-shop.onrender.com
 
-After deploy, open the bot and press /start.
+IMPORTANT:
+1. Upload this project / replace the old files.
+2. Set the three environment variables.
+3. Deploy.
+4. Open https://zex-shop.onrender.com/ and make sure it says ZEX SHOP is running.
+5. BotFather token must belong to the exact bot you are opening in Telegram.
+6. After startup logs show BOT CONNECTED and WEBHOOK SET, send /start.
