@@ -1,22 +1,17 @@
-ZEX SHOP - FIXED WEBHOOK VERSION
-
+ZEX SHOP FINAL
 Python: 3.11.9
+1 Gold = 120 so'm.
+Gold purchase checks balance, shows G22 Flock image, asks Pattern then Standoff 2 profile screenshot.
+Customer balance is reserved. Admin receives the order with Gold amount increased by 20%, plus photo and HA/YOQ buttons. YOQ refunds balance.
+Admin: /Admin
+Statistics, broadcast, add/subtract balance, temporary mute.
 
-Render Build Command:
+Render Build:
 pip install --only-binary=:all: -r requirements.txt
-
-Render Start Command:
+Render Start:
 uvicorn bot:app --host 0.0.0.0 --port $PORT
 
-Environment:
-BOT_TOKEN = BotFather token
-ADMIN_IDS = Telegram ID (optional)
-WEBHOOK_BASE = https://zex-shop.onrender.com
-
-IMPORTANT:
-1. Upload this project / replace the old files.
-2. Set the three environment variables.
-3. Deploy.
-4. Open https://zex-shop.onrender.com/ and make sure it says ZEX SHOP is running.
-5. BotFather token must belong to the exact bot you are opening in Telegram.
-6. After startup logs show BOT CONNECTED and WEBHOOK SET, send /start.
+ENV:
+BOT_TOKEN=BotFather token
+ADMIN_IDS=your numeric Telegram ID
+WEBHOOK_BASE=https://zex-shop.onrender.com

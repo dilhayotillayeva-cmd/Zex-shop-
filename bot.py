@@ -1,147 +1,196 @@
-import os
-import sqlite3
+import os, sqlite3, math
 from contextlib import closing
+from datetime import datetime, timedelta
 from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher, types
-from aiogram.filters import CommandStart
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.filters import CommandStart, Command
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip()
-WEBHOOK_BASE = os.environ.get("WEBHOOK_BASE", "").strip().rstrip("/")
+TOKEN=os.getenv("BOT_TOKEN","").strip()
+BASE=os.getenv("WEBHOOK_BASE","").strip().rstrip("/")
+ADMINS={int(x.strip()) for x in os.getenv("ADMIN_IDS","").split(",") if x.strip().isdigit()}
+if not TOKEN: raise RuntimeError("BOT_TOKEN is missing")
+if not BASE: raise RuntimeError("WEBHOOK_BASE is missing")
 
-if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN is missing")
-if not WEBHOOK_BASE:
-    raise RuntimeError("WEBHOOK_BASE is missing")
+DB="zex_shop.db"; RATE=120; WEBHOOK=BASE+"/webhook"
+bot=Bot(TOKEN); dp=Dispatcher(); app=FastAPI(); state={}; broadcast=set()
 
-DB = "zex_shop.db"
-WEBHOOK_PATH = "/webhook"
-WEBHOOK_URL = WEBHOOK_BASE + WEBHOOK_PATH
+def con(): return sqlite3.connect(DB)
+def init():
+    with closing(con()) as c:
+        c.execute("""CREATE TABLE IF NOT EXISTS users(
+        user_id INTEGER PRIMARY KEY,username TEXT DEFAULT '',first_name TEXT DEFAULT '',
+        balance REAL DEFAULT 0,muted_until TEXT DEFAULT '')""")
+        c.execute("""CREATE TABLE IF NOT EXISTS orders(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,username TEXT,gold INTEGER,
+        cost REAL,pattern TEXT,admin_gold INTEGER,photo_file_id TEXT,status TEXT DEFAULT 'PENDING',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        c.commit()
+def save(u):
+    with closing(con()) as c:
+        c.execute("INSERT OR IGNORE INTO users(user_id,username,first_name) VALUES(?,?,?)",(u.id,u.username or "",u.first_name or ""))
+        c.execute("UPDATE users SET username=?,first_name=? WHERE user_id=?",(u.username or "",u.first_name or "",u.id)); c.commit()
+def bal(uid):
+    with closing(con()) as c:
+        r=c.execute("SELECT balance FROM users WHERE user_id=?",(uid,)).fetchone()
+    return float(r[0]) if r else 0
+def change(uid,x):
+    with closing(con()) as c: c.execute("UPDATE users SET balance=balance+? WHERE user_id=?",(x,uid)); c.commit()
+def admin(uid): return uid in ADMINS
+def muted(uid):
+    with closing(con()) as c: r=c.execute("SELECT muted_until FROM users WHERE user_id=?",(uid,)).fetchone()
+    try: return bool(r and r[0] and datetime.fromisoformat(r[0])>datetime.utcnow())
+    except: return False
 
-bot = Bot(BOT_TOKEN)
-dp = Dispatcher()
-app = FastAPI()
-
-def db():
-    return sqlite3.connect(DB)
-
-def init_db():
-    with closing(db()) as con:
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY,
-                username TEXT DEFAULT '',
-                first_name TEXT DEFAULT '',
-                balance REAL DEFAULT 0,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        con.commit()
-
-def save_user(user: types.User):
-    with closing(db()) as con:
-        con.execute("""
-            INSERT OR IGNORE INTO users
-            (user_id, username, first_name, balance)
-            VALUES (?, ?, ?, 0)
-        """, (user.id, user.username or "", user.first_name or ""))
-        con.execute("""
-            UPDATE users SET username=?, first_name=? WHERE user_id=?
-        """, (user.username or "", user.first_name or "", user.id))
-        con.commit()
-
-def keyboard():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="🎟 PROMOKOD"), KeyboardButton(text="👤 PROFIL")],
-            [KeyboardButton(text="🧮 GOLD HISOBLASH"), KeyboardButton(text="🛒 GOLD SOTIB OLISH")],
-            [KeyboardButton(text="💳 PUL KIRITISH")]
-        ],
-        resize_keyboard=True
-    )
+def main():
+    return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="🎟 PROMOKOD"),KeyboardButton(text="👤 PROFIL")],
+        [KeyboardButton(text="🧮 GOLD HISOBLASH"),KeyboardButton(text="🛒 GOLD SOTIB OLISH")],
+        [KeyboardButton(text="💳 PUL KIRITISH")]],resize_keyboard=True)
+def admink():
+    return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="📊 STATISTIKA"),KeyboardButton(text="📢 XABAR YUBORISH")],
+        [KeyboardButton(text="💰 BALANS QO‘SHISH"),KeyboardButton(text="➖ BALANS AYIRISH")],
+        [KeyboardButton(text="🔇 MUTE"),KeyboardButton(text="⬅️ ADMIN PANELDAN CHIQISH")]],resize_keyboard=True)
+def obtn(i):
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ HA",callback_data=f"yes:{i}"),
+        InlineKeyboardButton(text="❌ YO‘Q",callback_data=f"no:{i}")]])
 
 @dp.message(CommandStart())
-async def start(message: types.Message):
-    save_user(message.from_user)
-    await message.answer(
-        "👋 ZEX SHOP ga xush kelibsiz!\n\n"
-        "🪙 Standoff 2 Gold xizmatlari uchun kerakli bo‘limni tanlang 👇",
-        reply_markup=keyboard()
-    )
+async def start(m):
+    save(m.from_user); state.pop(m.from_user.id,None)
+    await m.answer("👋 ZEX SHOP ga xush kelibsiz!\n\n🪙 1 Gold = 120 so‘m\nKerakli bo‘limni tanlang 👇",reply_markup=main())
+
+@dp.message(Command("Admin"))
+async def admin_cmd(m):
+    if not admin(m.from_user.id): return await m.answer("⛔ Sizda admin huquqi yo‘q.")
+    state.pop(m.from_user.id,None); await m.answer("🛠 ADMIN PANEL",reply_markup=admink())
+
+@dp.message(lambda m: m.photo is not None)
+async def photo(m):
+    uid=m.from_user.id; save(m.from_user); s=state.get(uid)
+    if not isinstance(s,dict) or s.get("step")!="photo": return
+    ag=math.ceil(s["gold"]*1.2); pid=m.photo[-1].file_id
+    with closing(con()) as c:
+        cur=c.execute("INSERT INTO orders(user_id,username,gold,cost,pattern,admin_gold,photo_file_id) VALUES(?,?,?,?,?,?,?)",
+                       (uid,m.from_user.username or "",s["gold"],s["cost"],s["pattern"],ag,pid))
+        oid=cur.lastrowid; c.commit()
+    state.pop(uid,None)
+    await m.answer(f"✅ BUYURTMA QABUL QILINDI!\n\n🪙 Gold: {s['gold']}\n💰 Narxi: {s['cost']:,.0f} so‘m\n🔢 Pattern: {s['pattern']}\n\nAdmin buyurtmani tekshiradi.",reply_markup=main())
+    cap=f"🛒 YANGI BUYURTMA #{oid}\n\n👤 MIJOZ: {uid}\n💰 NARXI: {s['cost']:,.0f} so‘m\n🔢 PATTERN: {s['pattern']}\n🪙 GOLD: {ag} (20% qo‘shilgan)\n\nBUYURTMA AMALGA OSHDIMI?"
+    for a in ADMINS:
+        try: await bot.send_photo(a,pid,caption=cap,reply_markup=obtn(oid))
+        except Exception as e: print("ADMIN SEND ERROR",e,flush=True)
+
+@dp.callback_query(lambda c:c.data.startswith("yes:") or c.data.startswith("no:"))
+async def order_cb(q):
+    if not admin(q.from_user.id): return await q.answer("⛔ Admin uchun.",show_alert=True)
+    ok=q.data.startswith("yes:"); oid=int(q.data.split(":")[1])
+    with closing(con()) as c:
+        r=c.execute("SELECT user_id,cost,status FROM orders WHERE id=?",(oid,)).fetchone()
+        if not r: return await q.answer("Buyurtma topilmadi.",show_alert=True)
+        uid,cost,status=r
+        if status!="PENDING": return await q.answer("Allaqachon ko‘rib chiqilgan.",show_alert=True)
+        c.execute("UPDATE orders SET status=? WHERE id=?",("DONE" if ok else "CANCELED",oid)); c.commit()
+    if not ok: change(uid,cost)
+    await q.message.edit_reply_markup(reply_markup=None); await q.answer("Saqlandi.")
+    try:
+        await bot.send_message(uid,("✅ BUYURTMANGIZ BAJARILDI!" if ok else f"❌ BUYURTMA BEKOR QILINDI.\n💰 {cost:,.0f} so‘m balansingizga qaytarildi."))
+    except: pass
 
 @dp.message()
-async def menu_handler(message: types.Message):
-    save_user(message.from_user)
-    t = message.text or ""
+async def msg(m):
+    uid=m.from_user.id; save(m.from_user)
+    if muted(uid) and not admin(uid): return await m.answer("🔇 Siz vaqtincha bloklangansiz.")
+    t=m.text or ""; s=state.get(uid)
 
-    if t == "👤 PROFIL":
-        with closing(db()) as con:
-            row = con.execute(
-                "SELECT balance FROM users WHERE user_id=?",
-                (message.from_user.id,)
-            ).fetchone()
-        balance = float(row[0]) if row else 0
-        await message.answer(
-            f"👤 PROFIL\n\n🆔 ID: {message.from_user.id}\n💰 Balans: {balance:g} so'm"
-        )
+    if s=="calc":
+        try:
+            g=int(t.replace(" ","")); assert g>0
+            await m.answer(f"🧮 {g:,} Gold × 120 so‘m = {g*RATE:,} so‘m")
+        except: await m.answer("❌ Masalan: 100")
+        state.pop(uid,None); return
 
-    elif t == "💳 PUL KIRITISH":
-        await message.answer("💳 Pul kiritish uchun: @lwox_org")
+    if s=="buy":
+        try: g=int(t.replace(" ","")); assert g>0
+        except: return await m.answer("❌ Gold miqdorini son bilan kiriting. Masalan: 100")
+        cost=g*RATE
+        if bal(uid)<cost:
+            state.pop(uid,None); return await m.answer(f"❌ Balans yetarli emas.\nKerak: {cost:,} so‘m\nBalans: {bal(uid):,.0f} so‘m",reply_markup=main())
+        change(uid,-cost); state[uid]={"step":"pattern","gold":g,"cost":cost}
+        await m.answer_photo(types.FSInputFile("g22_flock.jpg"),caption="🔫 G22 GLOCK FLOCK PATTERN SOTIB OLING\nVA BIZGA YUBORING\n\nMisol: 100 | 756\nGold narxi | Pattern soni\n\nSTANDOFF 2 PROFILIZNI RASMINI YUBORING")
+        return await m.answer("1️⃣ Pattern sonini yuboring. Masalan: 756")
 
-    elif t == "🎟 PROMOKOD":
-        await message.answer("🎟 Promokod bo‘limi.")
+    if isinstance(s,dict) and s.get("step")=="pattern":
+        s["step"]="photo"; s["pattern"]=t.strip(); state[uid]=s
+        return await m.answer("2️⃣ Endi STANDOFF 2 profilingizning rasmini yuboring 📸")
 
-    elif t == "🧮 GOLD HISOBLASH":
-        await message.answer("🧮 Gold hisoblash bo‘limi.")
+    if isinstance(s,dict) and s.get("step") in ("add","sub","mute"):
+        try:
+            a,b=t.split(); a=int(a); b=float(b)
+            if s["step"]=="mute":
+                until=datetime.utcnow()+timedelta(minutes=int(b))
+                with closing(con()) as c: c.execute("UPDATE users SET muted_until=? WHERE user_id=?",(until.isoformat(),a)); c.commit()
+                out=f"🔇 {a} {int(b)} daqiqaga mute qilindi."
+            else:
+                change(a,b if s["step"]=="add" else -b); out=f"✅ {a} hisobiga o‘zgarish kiritildi."
+        except: out="Format: USER_ID SUMMA\nMasalan: 123456789 50000"
+        state.pop(uid,None); return await m.answer(out,reply_markup=admink())
 
-    elif t == "🛒 GOLD SOTIB OLISH":
-        await message.answer(
-            "🛒 Gold sotib olish uchun admin bilan bog‘laning."
-        )
+    if uid in broadcast and admin(uid):
+        sent=0
+        with closing(con()) as c: users=c.execute("SELECT user_id FROM users").fetchall()
+        for (x,) in users:
+            try: await bot.send_message(x,t); sent+=1
+            except: pass
+        broadcast.remove(uid); return await m.answer(f"📢 {sent} ta foydalanuvchiga yuborildi.",reply_markup=admink())
 
-    else:
-        await message.answer("Menyudan bo‘limni tanlang 👇", reply_markup=keyboard())
+    if admin(uid):
+        if t=="📊 STATISTIKA":
+            with closing(con()) as c:
+                u=c.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+                o=c.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
+                p=c.execute("SELECT COUNT(*) FROM orders WHERE status='PENDING'").fetchone()[0]
+                d=c.execute("SELECT COUNT(*) FROM orders WHERE status='DONE'").fetchone()[0]
+                x=c.execute("SELECT COUNT(*) FROM orders WHERE status='CANCELED'").fetchone()[0]
+                g=c.execute("SELECT COALESCE(SUM(gold),0) FROM orders WHERE status='DONE'").fetchone()[0]
+            return await m.answer(f"📊 STATISTIKA\n\n👥 Foydalanuvchilar: {u}\n🛒 Buyurtmalar: {o}\n⏳ Kutilmoqda: {p}\n✅ Bajarilgan: {d}\n❌ Bekor: {x}\n🪙 Bajarilgan Gold: {g}")
+        if t=="📢 XABAR YUBORISH":
+            broadcast.add(uid); return await m.answer("📢 Endi xabarni yozing.")
+        if t=="💰 BALANS QO‘SHISH":
+            state[uid]={"step":"add"}; return await m.answer("USER_ID SUMMA\nMasalan: 123456789 50000")
+        if t=="➖ BALANS AYIRISH":
+            state[uid]={"step":"sub"}; return await m.answer("USER_ID SUMMA\nMasalan: 123456789 50000")
+        if t=="🔇 MUTE":
+            state[uid]={"step":"mute"}; return await m.answer("USER_ID DAQIQA\nMasalan: 123456789 60")
+        if t=="⬅️ ADMIN PANELDAN CHIQISH": return await m.answer("Asosiy menyu.",reply_markup=main())
+
+    if t=="👤 PROFIL": return await m.answer(f"👤 PROFIL\n\n🆔 ID: {uid}\n💰 Balans: {bal(uid):,.0f} so‘m")
+    if t=="💳 PUL KIRITISH": return await m.answer("💳 Pul kiritish uchun: @lwox_org")
+    if t=="🎟 PROMOKOD": return await m.answer("🎟 Promokod bo‘limi.")
+    if t=="🧮 GOLD HISOBLASH": state[uid]="calc"; return await m.answer("🧮 GOLD MIQDORINI KIRITING\n\nKurs: 1 Gold = 120 so‘m\nMasalan: 100")
+    if t=="🛒 GOLD SOTIB OLISH": state[uid]="buy"; return await m.answer("🪙 GOLD MIQDORINI KIRITING\n\nKurs: 1 Gold = 120 so‘m\nMasalan: 100")
+    await m.answer("Menyudan kerakli bo‘limni tanlang 👇",reply_markup=main())
 
 @app.get("/")
-async def root():
-    return {"status": "ZEX SHOP is running", "webhook": WEBHOOK_URL}
-
+async def root(): return {"status":"ZEX SHOP is running","webhook":WEBHOOK}
 @app.get("/health")
-async def health():
-    return {"ok": True}
-
-@app.post(WEBHOOK_PATH)
-async def webhook(request: Request):
+async def health(): return {"ok":True}
+@app.post("/webhook")
+async def webhook(r:Request):
     try:
-        data = await request.json()
-        update = types.Update.model_validate(data)
-        await dp.feed_update(bot, update)
-        return {"ok": True}
+        u=types.Update.model_validate(await r.json()); await dp.feed_update(bot,u); return {"ok":True}
     except Exception as e:
-        print("WEBHOOK ERROR:", repr(e), flush=True)
-        return {"ok": False}
-
+        print("WEBHOOK ERROR",repr(e),flush=True); return {"ok":False}
 @app.on_event("startup")
 async def startup():
-    init_db()
+    init()
     try:
-        info = await bot.get_me()
-        print(f"BOT CONNECTED: @{info.username} ({info.id})", flush=True)
+        me=await bot.get_me(); print(f"BOT CONNECTED @{me.username}",flush=True)
         await bot.delete_webhook(drop_pending_updates=False)
-        await bot.set_webhook(
-            WEBHOOK_URL,
-            allowed_updates=dp.resolve_used_update_types(),
-            drop_pending_updates=False
-        )
-        webhook_info = await bot.get_webhook_info()
-        print(
-            f"WEBHOOK SET: {webhook_info.url} | "
-            f"pending={webhook_info.pending_update_count}",
-            flush=True
-        )
-    except Exception as e:
-        print("STARTUP ERROR:", repr(e), flush=True)
-
+        await bot.set_webhook(WEBHOOK,allowed_updates=dp.resolve_used_update_types(),drop_pending_updates=False)
+        w=await bot.get_webhook_info(); print(f"WEBHOOK SET {w.url} pending={w.pending_update_count}",flush=True)
+    except Exception as e: print("STARTUP ERROR",repr(e),flush=True)
 @app.on_event("shutdown")
-async def shutdown():
-    await bot.session.close()
+async def shutdown(): await bot.session.close()
